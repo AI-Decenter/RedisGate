@@ -529,7 +529,7 @@ pub async fn delete_redis_instance(
 
     let namespace: Option<String> = redis_instance.try_get("namespace").ok();
     let slug: Option<String> = redis_instance.try_get("slug").ok();
-    let api_key_id: uuid::Uuid = redis_instance.try_get("api_key_id").map_err(|e| {
+    let api_key_id: Option<Uuid> = redis_instance.try_get("api_key_id").map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse::<()>::error(format!("Database field error: {}", e))),
