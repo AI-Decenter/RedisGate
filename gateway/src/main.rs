@@ -1,11 +1,12 @@
 // src/main.rs
 use axum::{
-    routing::{get, post},
+    routing::{any, get, post},
     Router,
 };
 use deadpool_redis::{Pool, Runtime};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::net::SocketAddr;
+use axum::routing::delete;
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{fmt, prelude::*};
@@ -22,30 +23,12 @@ use crate::config::{Config, RedisConfig};
 use crate::redis::pool::RedisPoolManager;
 use crate::server::AppState;
 
-use handlers::health::{health_check, metrics_endpoint};
-use handlers::keys::{get_key, set_key};
+use handlers::health::*;
+use handlers::keys::*;
 
 mod middleware;
 use middleware::{logging::request_logger, metrics::metrics_middleware};
 
-
-
-// /// Alias for Redis connection pool
-// type RedisPool = Pool;
-//
-// /// Initialize Redis connection pool
-// async fn init_redis_pool(cfg: &RedisConfig) -> RedisPool {
-//     let mut cfg_pool = deadpool_redis::Config::from_url(&cfg.url);
-//
-//     cfg_pool.pool = Some(deadpool_redis::PoolConfig {
-//         max_size: cfg.pool_size as usize,
-//         timeouts: Default::default(),
-//     });
-//
-//     cfg_pool
-//         .create_pool(Some(Runtime::Tokio1))
-//         .expect("Failed to create Redis pool")
-// }
 
 /// Main entry point
 #[tokio::main]
@@ -85,14 +68,24 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Build application router
+    // Build application router
     let app = Router::new()
-        .route("/{instance_name}/set/{key}", post(set_key))
-        .route("/{instance_name}/get/{key}", get(get_key))
+        // New REST API routes
+        .route("/{instance_name}/pipeline", post(redis_pipeline))
+        .route("/{instance_name}/multi-exec", post(redis_transaction))
+        .route("/{instance_name}", post(redis_command_json))
+        .route("/{instance_name}/command/{*command_parts}", any(redis_command))
+
+        .route("/legacy/{instance_name}/{key}", get(get_key_legacy))
+        .route("/legacy/{instance_name}/{key}", post(set_key_legacy))
+        .route("/legacy/{instance_name}/del/{keys}", delete(delete_keys_legacy)) // Thêm route này
+
+        // Health and metrics endpoints
         .route("/healthz", get(health_check))
         .route("/metrics", get({
-                let handle = metrics_handle.clone();
-                move || async move { metrics_endpoint(handle.clone()).await }
-            }),
+            let handle = metrics_handle.clone();
+            move || async move { metrics_endpoint(handle.clone()).await }
+        }),
         )
         .with_state(app_state)
         .layer(
